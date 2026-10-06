@@ -1,0 +1,70 @@
+name: KWS Research
+
+on:
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: "Comma-separated seed keywords (blank = use seeds.txt)"
+        required: false
+        default: ""
+      country:
+        description: "Country code (us, uk, pk, ae, ...)"
+        required: false
+        default: "us"
+      lang:
+        description: "Language code"
+        required: false
+        default: "en"
+      depth:
+        description: "Expansion depth (1-2)"
+        required: false
+        default: "1"
+      exclude:
+        description: "Comma-separated negative words"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 3 * * 1" # weekly, Monday 03:17 UTC, using seeds.txt
+  push:
+    paths: ["kws_research/**", "tests/**"]
+  pull_request:
+    paths: ["kws_research/**", "tests/**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  research:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run keyword research
+        env:
+          SEEDS: ${{ github.event.inputs.seeds }}
+          COUNTRY: ${{ github.event.inputs.country || 'us' }}
+          LANG_CODE: ${{ github.event.inputs.lang || 'en' }}
+          DEPTH: ${{ github.event.inputs.depth || '1' }}
+          EXCLUDE: ${{ github.event.inputs.exclude }}
+        run: |
+          IMPORTS=()
+          for f in imports/*.csv imports/*.tsv; do [ -f "$f" ] && IMPORTS+=(-i "$f"); done
+          if [ -n "$SEEDS" ]; then SEED_ARGS=(-s "$SEEDS"); else SEED_ARGS=(-f seeds.txt); fi
+          python -m kws_research "${SEED_ARGS[@]}" "${IMPORTS[@]}" \
+            --country "$COUNTRY" --lang "$LANG_CODE" --depth "$DEPTH" --exclude "$EXCLUDE" -o output/report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kws-report-${{ github.run_number }}
+          path: output/report
